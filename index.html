@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#161b22" />
+  <title>Folio</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon-32.png" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand" id="brandHome" role="button" tabindex="0" title="Library / 書庫">
+        <img class="brand-mark" src="icons/icon-192.png" alt="" />
+        <div>
+          Folio
+          <small id="brandSub">Study library</small>
+        </div>
+      </div>
+      <div class="doc-title" id="docTitle"></div>
+      <div class="top-actions" id="libraryActions">
+        <button class="btn" id="btnLang" title="Language">中 / EN</button>
+        <button class="btn" id="btnGithub" data-i18n="github">GitHub</button>
+        <button class="btn" id="btnSync" data-i18n="sync">Sync</button>
+        <button class="btn" id="btnImport" data-i18n="upload">Upload PDF</button>
+        <button class="btn primary" id="btnNewNotes" data-i18n="blank">Blank notebook</button>
+      </div>
+      <div class="top-actions hidden" id="readerActions">
+        <button class="btn primary" id="btnAddPage" data-i18n="addPage">+ Page</button>
+        <button class="btn danger" id="btnDeletePage" data-i18n="deletePage">Delete page</button>
+        <button class="btn" id="btnSave" data-i18n="save">Save</button>
+        <button class="btn" id="btnExport" data-i18n="download">Download PDF</button>
+      </div>
+    </header>
+
+    <main class="library" id="libraryView">
+      <div class="library-head">
+        <div>
+          <h1 data-i18n="library">Library</h1>
+          <p data-i18n="libraryHint">Upload lecture slides or papers. Annotate them. Add extra pages for your own remarks.</p>
+        </div>
+        <input class="search" id="search" data-i18n-placeholder="search" placeholder="Search titles…" />
+      </div>
+      <div class="topic-bar" id="topicBar"></div>
+      <div id="libraryBody"></div>
+    </main>
+
+    <section class="reader hidden" id="readerView">
+      <aside class="tools" id="tools">
+        <button class="icon-btn active" data-tool="pen" data-i18n-title="pen" title="Pen">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/></svg>
+        </button>
+        <button class="icon-btn" data-tool="highlighter" data-i18n-title="highlighter" title="Highlighter">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l-6 6v3h3l6-6"/><path d="M16 4l4 4-9 9H7v-4l9-9z"/></svg>
+        </button>
+        <button class="icon-btn" data-tool="text" data-i18n-title="text" title="Text on page">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M8 20h8"/></svg>
+        </button>
+        <button class="icon-btn" data-tool="comment" data-i18n-title="comment" title="Sticky comment">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </button>
+        <button class="icon-btn" data-tool="eraser" data-i18n-title="eraser" title="Eraser">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 16l9-9 6 6-9 9H3v-6z"/><path d="M16 7l3 3"/></svg>
+        </button>
+        <button class="icon-btn" data-tool="image" id="btnImageTool" data-i18n-title="image" title="Photo">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10.5" r="1.5"/><path d="M21 16l-5-5-8 8"/></svg>
+        </button>
+        <div class="sep"></div>
+        <button class="color-dot active" data-color="#1a1d24" style="background:#1a1d24" title="Ink"></button>
+        <button class="color-dot" data-color="#c0392b" style="background:#c0392b" title="Red"></button>
+        <button class="color-dot" data-color="#1e6f5c" style="background:#1e6f5c" title="Green"></button>
+        <button class="color-dot" data-color="#1d4e89" style="background:#1d4e89" title="Blue"></button>
+        <button class="color-dot" data-color="#f1c40f" style="background:#f1c40f" title="Yellow"></button>
+        <div class="sep"></div>
+        <button class="icon-btn" id="btnUndo" data-i18n-title="undo" title="Undo">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 14l-4-4 4-4"/><path d="M5 10h11a4 4 0 0 1 0 8h-1"/></svg>
+        </button>
+      </aside>
+
+      <div class="stage-wrap">
+        <div class="stage-bar">
+          <button class="icon-btn" id="zoomOut">−</button>
+          <span id="zoomLabel">110%</span>
+          <button class="icon-btn" id="zoomIn">+</button>
+          <span class="dot">·</span>
+          <button class="icon-btn" id="prevPage">‹</button>
+          <span id="pageLabel">1 / 1</span>
+          <button class="icon-btn" id="nextPage">›</button>
+        </div>
+        <div class="stage" id="stage">
+          <div class="pages" id="pages"></div>
+        </div>
+      </div>
+
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-resizer" id="sidebarResizer" title="Drag to resize"></div>
+        <h2 data-i18n="pageMemos">Page memos</h2>
+        <div class="remarks" id="pageMemos"></div>
+        <h2 data-i18n="remarks">Remarks</h2>
+        <div class="remarks" id="remarks"></div>
+        <div class="remark-add">
+          <textarea id="newRemark" data-i18n-placeholder="remarkPh" placeholder="Write a remark…"></textarea>
+          <button class="btn primary wide" id="btnAddRemark" data-i18n="addRemark">Add remark</button>
+        </div>
+      </aside>
+    </section>
+  </div>
+
+  <input class="file-input" id="fileInput" type="file" accept="application/pdf" multiple />
+  <input class="file-input" id="imageInput" type="file" accept="image/*" />
+  <div class="toast" id="toast"></div>
+
+  <div class="modal-bg hidden" id="pageModal">
+    <div class="modal">
+      <h3 data-i18n="addPageTitle">Add a page after the current one</h3>
+      <p class="modal-hint" data-i18n="addPageHint">Choose how you want to write on the new page.</p>
+      <button class="choice" id="choicePdf">
+        <strong data-i18n="choicePdf">PDF remark page</strong>
+        <span data-i18n="choicePdfHint">Lined paper. Draw with the pen or drop photos.</span>
+      </button>
+      <button class="choice" id="choiceWord">
+        <strong data-i18n="choiceWord">Word page</strong>
+        <span data-i18n="choiceWordHint">Type directly, like Microsoft Word.</span>
+      </button>
+      <button class="btn wide" id="pageModalClose" data-i18n="cancel">Cancel</button>
+    </div>
+  </div>
+
+  <div class="modal-bg hidden" id="ghModal">
+    <div class="modal">
+      <h3 data-i18n="ghTitle">GitHub library</h3>
+      <p class="modal-hint" data-i18n="ghHint">Grok puts PDFs in this repo. This device pulls them into Folio.</p>
+      <label class="field"><span>owner/repo</span><input id="ghRepo" placeholder="yourname/folio-library" /></label>
+      <label class="field"><span>branch</span><input id="ghBranch" placeholder="main" /></label>
+      <label class="field"><span data-i18n="ghToken">token (only if the repo is private)</span><input id="ghToken" type="password" placeholder="ghp_…" /></label>
+      <button class="btn primary wide" id="ghSave" data-i18n="save">Save</button>
+      <button class="btn wide" id="ghClose" data-i18n="cancel">Cancel</button>
+    </div>
+  </div>
+
+  <script src="vendor/pdf.min.js"></script>
+  <script src="vendor/pdf-lib.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
