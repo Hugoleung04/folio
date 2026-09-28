@@ -16,7 +16,7 @@
       <div class="brand" id="brandHome" role="button" tabindex="0" title="Library / 書庫">
         <img class="brand-mark" src="icons/icon-192.png" alt="" />
         <div>
-          Folio <span class="app-ver" id="appVersion">v1.1.1</span>
+          Folio <span class="app-ver" id="appVersion">v1.2.2</span>
           <small id="brandSub">Study library</small>
         </div>
       </div>
@@ -25,6 +25,7 @@
         <button class="btn" id="btnLang" title="Language">中 / EN</button>
         <button class="btn" id="btnGithub" data-i18n="github">GitHub</button>
         <button class="btn" id="btnSync" data-i18n="sync">Sync</button>
+        <button class="btn" id="btnImportPack" data-i18n="packImport">Import pack</button>
         <button class="btn" id="btnImport" data-i18n="upload">Upload PDF</button>
         <button class="btn primary" id="btnNewNotes" data-i18n="blank">Blank notebook</button>
       </div>
@@ -32,6 +33,8 @@
         <button class="btn primary" id="btnAddPage" data-i18n="addPage">+ Page</button>
         <button class="btn danger" id="btnDeletePage" data-i18n="deletePage">Delete page</button>
         <button class="btn" id="btnSave" data-i18n="save">Save</button>
+        <button class="btn" id="btnSyncReader" data-i18n="sync">Sync</button>
+        <button class="btn" id="btnPack" data-i18n="packSend">Send</button>
         <button class="btn" id="btnExport" data-i18n="download">Download PDF</button>
       </div>
     </header>
@@ -110,6 +113,7 @@
   </div>
 
   <input class="file-input" id="fileInput" type="file" accept="application/pdf" multiple />
+  <input class="file-input" id="packInput" type="file" accept=".folio,application/json" />
   <input class="file-input" id="imageInput" type="file" accept="image/*" />
   <div class="toast" id="toast"></div>
 
@@ -132,7 +136,7 @@
   <div class="modal-bg hidden" id="ghModal">
     <div class="modal">
       <h3 data-i18n="ghTitle">GitHub library</h3>
-      <p class="modal-hint" data-i18n="ghHint">Grok puts PDFs in this repo. This device pulls them into Folio.</p>
+      <p class="modal-hint" data-i18n="ghHint">Same GitHub account + repo on every device. Save uploads notes. Sync downloads them.</p>
       <label class="field"><span>owner/repo</span><input id="ghRepo" placeholder="yourname/folio-library" /></label>
       <label class="field"><span>branch</span><input id="ghBranch" placeholder="main" /></label>
       <label class="field"><span data-i18n="ghToken">token (only if the repo is private)</span><input id="ghToken" type="password" placeholder="ghp_…" /></label>

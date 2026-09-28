@@ -6,7 +6,7 @@
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => [...document.querySelectorAll(sel)];
-  const APP_VERSION = "1.1.1";
+  const APP_VERSION = "1.2.2";
 
   const I18N = {
     en: {
@@ -38,13 +38,26 @@
       github: "GitHub",
       sync: "Sync",
       ghTitle: "GitHub library",
-      ghHint: "Grok uploads PDFs to this repo. Click Sync on this device to see them.",
-      ghToken: "Token (private repo only)",
+      ghHint: "Same GitHub account + repo on every device. Save uploads notes. Sync downloads them.",
+      ghToken: "Token (needed to upload notes)",
       ghNeed: "Set owner/repo first (GitHub button).",
-      syncing: "Syncing from GitHub…",
+      ghNeedToken: "Add a GitHub token to share notes with other devices.",
+      syncing: "Syncing with GitHub…",
       syncOk: "Sync finished",
-      syncFail: "Sync failed. Check repo name and that library/ exists.",
-      syncNew: " new file(s)",
+      syncFail: "Sync failed. Check repo name, token, and that library/ exists.",
+      syncNew: " new",
+      syncUpdated: " updated",
+      syncReplaced: " replaced",
+      pushing: "Uploading notes to GitHub…",
+      pushed: "Saved here and on GitHub",
+      pushFail: "Saved here. GitHub upload failed — check the token.",
+      packSend: "Send",
+      packImport: "Import pack",
+      packHint: "No token needed. Creates a .folio file you can AirDrop or copy.",
+      packReady: "Pack ready — AirDrop or save the file",
+      packLoaded: "Notes imported on this device",
+      packFail: "This is not a Folio pack",
+      packBuilding: "Preparing pack…",
       memoOn: "p.",
       save: "Save",
       download: "Download PDF",
@@ -124,13 +137,26 @@
       github: "GitHub",
       sync: "同步",
       ghTitle: "GitHub 書庫",
-      ghHint: "Grok 把 PDF 放到這個 repo。在這部電腦按「同步」就會出現。",
-      ghToken: "Token（只有私人 repo 才需要）",
+      ghHint: "每部裝置填同一個 GitHub 帳號與 repo。儲存會上傳筆記，同步會下載。",
+      ghToken: "Token（上傳筆記必須有）",
       ghNeed: "請先在 GitHub 按鈕填 owner/repo。",
-      syncing: "正在從 GitHub 同步…",
+      ghNeedToken: "要與其他裝置分享筆記，請填 GitHub token。",
+      syncing: "正在與 GitHub 同步…",
       syncOk: "同步完成",
-      syncFail: "同步失敗。請檢查 repo 名稱，以及是否有 library/ 資料夾。",
+      syncFail: "同步失敗。請檢查 repo 名稱、token，以及是否有 library/ 資料夾。",
       syncNew: " 個新檔",
+      syncUpdated: " 個更新",
+      syncReplaced: " 個已取代",
+      pushing: "正在上傳筆記到 GitHub…",
+      pushed: "已儲存在此裝置，並已上傳 GitHub",
+      pushFail: "已儲存在此裝置，但 GitHub 上傳失敗，請檢查 token。",
+      packSend: "傳送",
+      packImport: "匯入筆記包",
+      packHint: "不用 token。會產生 .folio 檔，可用 AirDrop 或複製到另一部裝置。",
+      packReady: "筆記包已準備 — 用 AirDrop 或儲存檔案",
+      packLoaded: "已在此裝置匯入筆記",
+      packFail: "這不是 Folio 筆記包",
+      packBuilding: "正在準備筆記包…",
       memoOn: "第",
       save: "儲存",
       download: "下載 PDF",
@@ -548,12 +574,17 @@
           </div>
           <div class="card-actions">
             <button class="btn primary open">${t("open")}</button>
+            <button class="btn pack">${t("packSend")}</button>
             <button class="btn rename">${t("rename")}</button>
             <button class="btn danger del">${t("del")}</button>
           </div>
         </div>`;
     card.querySelector(".open").onclick = () => openDoc(doc.id);
     card.querySelector(".thumb").onclick = () => openDoc(doc.id);
+    card.querySelector(".pack").onclick = (e) => {
+      e.stopPropagation();
+      exportFolioPack(doc.id);
+    };
     card.querySelector(".topic-pill").onclick = async (e) => {
       e.stopPropagation();
       const name = prompt(t("topicPrompt"), doc.topic || "");
@@ -628,9 +659,37 @@
       wordDocs: {},
       topic: extra && extra.topic || "",
       githubPath: extra && extra.githubPath || "",
+      githubSha: extra && extra.githubSha || "",
     };
     await FolioDB.put(doc);
     return doc;
+  }
+
+  async function refreshPdfMeta(doc, bytes) {
+    doc.pdf = bytes;
+    try {
+      const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+      doc.pageCount = pdf.numPages;
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 0.35 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      doc.thumb = canvas.toDataURL("image/jpeg", 0.72);
+    } catch (err) {
+      console.warn(err);
+    }
+    return doc;
+  }
+
+  function resetMarksToPdf(doc) {
+    const n = doc.pageCount || 1;
+    doc.annots = {};
+    doc.remarks = [];
+    doc.wordDocs = {};
+    doc.notePages = [];
+    doc.sequence = Array.from({ length: n }, (_, i) => ({ kind: "pdf", pdfIndex: i + 1 }));
   }
 
   async function importFiles(files) {
@@ -1633,11 +1692,100 @@
     });
   }
 
+  async function shareOrDownload(blob, filename) {
+    const file = new File([blob], filename, { type: blob.type || "application/json" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: filename });
+        return;
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+      }
+    }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+  }
+
+  async function exportFolioPack(id) {
+    const doc = id ? await FolioDB.get(id) : state.current;
+    if (!doc) return;
+    toast(t("packBuilding"));
+    try {
+      const pack = {
+        type: "folio-pack",
+        version: 1,
+        name: doc.name,
+        topic: doc.topic || "",
+        annots: doc.annots || {},
+        remarks: doc.remarks || [],
+        sequence: doc.sequence || [],
+        wordDocs: doc.wordDocs || {},
+        notePages: doc.notePages || [],
+        updatedAt: doc.updatedAt || Date.now(),
+        pdf: bytesToBase64(doc.pdf),
+      };
+      const blob = new Blob([JSON.stringify(pack)], { type: "application/json" });
+      const filename = (doc.name || "notes").replace(/[\\/:*?"<>|]+/g, "_") + ".folio";
+      await shareOrDownload(blob, filename);
+      toast(t("packReady"));
+    } catch (err) {
+      console.warn(err);
+      toast(t("packFail"));
+    }
+  }
+
+  async function importFolioPack(file) {
+    try {
+      const text = await file.text();
+      const pack = JSON.parse(text);
+      if (!pack || pack.type !== "folio-pack" || !pack.pdf) throw new Error("pack");
+      const bytes = base64ToBytes(pack.pdf);
+      state.docs = await FolioDB.list();
+      const existing = (state.docs || []).find((d) => d.name === pack.name);
+      if (existing) {
+        existing.pdf = bytes;
+        applySidecar(existing, pack);
+        existing.topic = pack.topic || existing.topic || "";
+        await FolioDB.put(existing);
+        if (existing.topic) rememberTopic(existing.topic);
+      } else {
+        const doc = await savePdfBytes(bytes, pack.name || file.name, { topic: pack.topic || "" });
+        applySidecar(doc, pack);
+        await FolioDB.put(doc);
+        if (doc.topic) rememberTopic(doc.topic);
+      }
+      await refreshLibrary();
+      toast(t("packLoaded"));
+    } catch (err) {
+      console.warn(err);
+      toast(t("packFail"));
+    }
+  }
+
   async function saveCurrent() {
     if (!state.current) return;
     await FolioDB.put(state.current);
     state.dirty = false;
-    toast(t("savedBrowser"));
+    const s = ghSettings();
+    if (!s.repo) {
+      toast(t("savedBrowser"));
+      return;
+    }
+    if (!s.token) {
+      toast(t("savedBrowser") + " · " + t("ghNeedToken"));
+      return;
+    }
+    toast(t("pushing"));
+    try {
+      await pushDocToGithub(state.current);
+      toast(t("pushed"));
+    } catch (err) {
+      console.warn(err);
+      toast(t("pushFail"));
+    }
   }
 
   async function exportPdf() {
@@ -1795,7 +1943,14 @@
     e.target.value = "";
     if (files.length) await importFiles(files);
   });
+  $("#packInput").addEventListener("change", async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (file) await importFolioPack(file);
+  });
   $("#btnImport").onclick = () => $("#fileInput").click();
+  $("#btnImportPack").onclick = () => $("#packInput").click();
+  if ($("#btnPack")) $("#btnPack").onclick = () => exportFolioPack();
   $("#btnNewNotes").onclick = createBlankNotebook;
   $("#search").addEventListener("input", (e) => renderGrid(e.target.value));
   $("#brandHome").onclick = () => {
@@ -1893,6 +2048,8 @@
   document.addEventListener("dragover", (e) => e.preventDefault());
   document.addEventListener("drop", async (e) => {
     e.preventDefault();
+    const packs = [...e.dataTransfer.files].filter((f) => /\.folio$/i.test(f.name) || (/\.json$/i.test(f.name) && /folio/i.test(f.name)));
+    for (const pack of packs) await importFolioPack(pack);
     const pdfs = [...e.dataTransfer.files].filter((f) => f.name.toLowerCase().endsWith(".pdf"));
     if (pdfs.length) await importFiles(pdfs);
     const images = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"));
@@ -1921,6 +2078,10 @@
     catch { return {}; }
   }
 
+  function ghRepoName(s) {
+    return String((s && s.repo) || "").replace(/^https?:\/\/github.com\//i, "").replace(/\.git$/, "").trim();
+  }
+
   function openGhModal(show) {
     const s = ghSettings();
     $("#ghRepo").value = s.repo || "";
@@ -1929,57 +2090,305 @@
     $("#ghModal").classList.toggle("hidden", !show);
   }
 
-  async function ghFetch(url, token) {
-    const headers = { Accept: "application/vnd.github+json" };
+  async function ghRequest(url, token, opts) {
+    opts = opts || {};
+    const headers = {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
     if (token) headers.Authorization = "Bearer " + token;
-    const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error(String(res.status));
+    if (opts.body) headers["Content-Type"] = "application/json";
+    const res = await fetch(url, {
+      method: opts.method || "GET",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(res.status + " " + String(text || "").slice(0, 180));
+    }
+    if (res.status === 204) return {};
     return res.json();
+  }
+
+  function bytesToBase64(bytes) {
+    const u8 = toBytes(bytes);
+    let s = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < u8.length; i += chunk) {
+      s += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+    }
+    return btoa(s);
+  }
+
+  function base64ToBytes(b64) {
+    const bin = atob(String(b64 || "").replace(/\n/g, ""));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function ghFileName(doc) {
+    if (doc && doc.githubPath && /\.pdf$/i.test(doc.githubPath)) {
+      return doc.githubPath.replace(/^library\//, "");
+    }
+    const base = String((doc && doc.name) || "notes").replace(/\.pdf$/i, "").trim() || "notes";
+    return base.replace(/[\\/:*?"<>|]+/g, "_") + ".pdf";
+  }
+
+  function docToSidecar(doc) {
+    return {
+      version: 1,
+      updatedAt: doc.updatedAt || Date.now(),
+      name: doc.name,
+      topic: doc.topic || "",
+      annots: doc.annots || {},
+      remarks: doc.remarks || [],
+      sequence: doc.sequence || [],
+      wordDocs: doc.wordDocs || {},
+      notePages: doc.notePages || [],
+    };
+  }
+
+  function applySidecar(doc, side) {
+    if (!side || typeof side !== "object") return doc;
+    if (side.annots) doc.annots = side.annots;
+    if (Array.isArray(side.remarks)) doc.remarks = side.remarks;
+    if (Array.isArray(side.sequence) && side.sequence.length) doc.sequence = side.sequence;
+    if (side.wordDocs) doc.wordDocs = side.wordDocs;
+    if (Array.isArray(side.notePages)) doc.notePages = side.notePages;
+    if (side.topic != null) doc.topic = side.topic;
+    if (side.name) doc.name = side.name;
+    if (side.updatedAt) doc.updatedAt = side.updatedAt;
+    return doc;
+  }
+
+  async function ghGetContent(repo, path, branch, token) {
+    return ghRequest(
+      `https://api.github.com/repos/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`,
+      token
+    );
+  }
+
+  async function ghPutContent(repo, path, branch, token, contentB64, message, sha) {
+    const body = { message, content: contentB64, branch };
+    if (sha) body.sha = sha;
+    return ghRequest(
+      `https://api.github.com/repos/${repo}/contents/${path}`,
+      token,
+      { method: "PUT", body }
+    );
+  }
+
+  async function ghReadBytes(meta, token) {
+    if (!meta) return null;
+    if (meta.content && meta.encoding === "base64") return base64ToBytes(meta.content);
+    if (meta.download_url) {
+      const headers = {};
+      if (token) headers.Authorization = "Bearer " + token;
+      const res = await fetch(meta.download_url, { headers });
+      if (!res.ok) throw new Error("download " + res.status);
+      return new Uint8Array(await res.arrayBuffer());
+    }
+    return null;
+  }
+
+  async function upsertLibraryJson(repo, branch, token, entry) {
+    const meta = await ghGetContent(repo, "library.json", branch, token);
+    let catalog = { notes: [] };
+    if (meta && meta.content) {
+      try {
+        const parsed = JSON.parse(atob(meta.content.replace(/\n/g, "")));
+        catalog = Array.isArray(parsed) ? { notes: parsed } : parsed;
+        if (!Array.isArray(catalog.notes)) catalog.notes = [];
+      } catch (_) {}
+    }
+    const i = catalog.notes.findIndex((n) => n && n.file === entry.file);
+    if (i >= 0) catalog.notes[i] = { ...catalog.notes[i], ...entry };
+    else catalog.notes.push(entry);
+    await ghPutContent(
+      repo, "library.json", branch, token,
+      btoa(unescape(encodeURIComponent(JSON.stringify(catalog, null, 2)))),
+      "Folio: update library.json",
+      meta && meta.sha
+    );
+  }
+
+  async function pushDocToGithub(doc) {
+    const s = ghSettings();
+    const repo = ghRepoName(s);
+    if (!repo || !repo.includes("/")) throw new Error("repo");
+    if (!s.token) throw new Error("token");
+    const branch = s.branch || "main";
+    const file = ghFileName(doc);
+    const pdfPath = "library/" + file;
+    const sidePath = "library/" + file.replace(/\.pdf$/i, "") + ".folio.json";
+    const sidecar = docToSidecar(doc);
+    const sideMeta = await ghGetContent(repo, sidePath, branch, s.token);
+    await ghPutContent(
+      repo, sidePath, branch, s.token,
+      btoa(unescape(encodeURIComponent(JSON.stringify(sidecar)))),
+      "Folio: save notes for " + file,
+      sideMeta && sideMeta.sha
+    );
+    const pdfMeta = await ghGetContent(repo, pdfPath, branch, s.token);
+    if (!pdfMeta && doc.pdf) {
+      await ghPutContent(
+        repo, pdfPath, branch, s.token,
+        bytesToBase64(doc.pdf),
+        "Folio: add " + file
+      );
+    }
+    doc.githubPath = pdfPath;
+    await FolioDB.put(doc);
+    await upsertLibraryJson(repo, branch, s.token, {
+      file,
+      name: doc.name,
+      topic: doc.topic || "",
+      updatedAt: doc.updatedAt,
+    });
+    if (doc.topic) rememberTopic(doc.topic);
+  }
+
+  async function readSidecar(repo, file, branch, token) {
+    const sidePath = "library/" + String(file).replace(/\.pdf$/i, "") + ".folio.json";
+    const meta = await ghGetContent(repo, sidePath, branch, token);
+    if (!meta || !meta.content) return null;
+    try {
+      return JSON.parse(atob(meta.content.replace(/\n/g, "")));
+    } catch {
+      return null;
+    }
+  }
+
+  function findLocalDoc(file, catalogName) {
+    const key = "library/" + file;
+    const stem = file.replace(/\.pdf$/i, "");
+    return (state.docs || []).find((d) =>
+      d.githubPath === key ||
+      d.githubPath === file ||
+      d.name === stem ||
+      d.name === catalogName ||
+      ghFileName(d) === file
+    );
   }
 
   async function syncFromGithub() {
     const s = ghSettings();
-    const repo = String(s.repo || "").replace(/^https?:\/\/github.com\//, "").replace(/\.git$/, "").trim();
+    const repo = ghRepoName(s);
     if (!repo || !repo.includes("/")) return toast(t("ghNeed"));
     const branch = s.branch || "main";
     toast(t("syncing"));
     try {
-      const metaUrl = `https://api.github.com/repos/${repo}/contents/library.json?ref=${encodeURIComponent(branch)}`;
+      state.docs = await FolioDB.list();
       let catalog = {};
       try {
-        const meta = await ghFetch(metaUrl, s.token);
-        const json = JSON.parse(atob(meta.content.replace(/\n/g, "")));
-        const notes = Array.isArray(json) ? json : (json.notes || []);
-        notes.forEach((n) => {
-          if (n && n.file) catalog[n.file] = n;
-        });
+        const meta = await ghGetContent(repo, "library.json", branch, s.token);
+        if (meta && meta.content) {
+          const json = JSON.parse(atob(meta.content.replace(/\n/g, "")));
+          const notes = Array.isArray(json) ? json : (json.notes || []);
+          notes.forEach((n) => { if (n && n.file) catalog[n.file] = n; });
+        }
       } catch (_) {}
 
-      const list = await ghFetch(
+      const list = await ghRequest(
         `https://api.github.com/repos/${repo}/contents/library?ref=${encodeURIComponent(branch)}`,
         s.token
       );
       const files = (Array.isArray(list) ? list : []).filter((f) => /\.pdf$/i.test(f.name));
       let added = 0;
-      const existing = new Set((state.docs || []).map((d) => d.githubPath || d.name));
+      let updated = 0;
+      let replaced = 0;
+
+      const downloadPdf = async (f) => {
+        if (f.download_url) {
+          const res = await fetch(f.download_url);
+          if (res.ok) return new Uint8Array(await res.arrayBuffer());
+        }
+        return ghReadBytes(await ghGetContent(repo, "library/" + f.name, branch, s.token), s.token);
+      };
+
       for (const f of files) {
-        const key = "library/" + f.name;
-        if (existing.has(key) || existing.has(f.name.replace(/\.pdf$/i, ""))) continue;
-        const raw = await fetch(f.download_url);
-        if (!raw.ok) continue;
-        const bytes = new Uint8Array(await raw.arrayBuffer());
         const info = catalog[f.name] || {};
-        const doc = await savePdfBytes(bytes, info.name || f.name, {
-          topic: info.topic || "",
-          githubPath: key,
-        });
-        if (info.topic) rememberTopic(info.topic);
-        existing.add(key);
-        added += 1;
-        void doc;
+        const side = await readSidecar(repo, f.name, branch, s.token);
+        const local = findLocalDoc(f.name, info.name);
+        const remoteAt = (side && side.updatedAt) || info.updatedAt || 0;
+        const shaChanged = !!(local && f.sha && f.sha !== local.githubSha);
+        if (!local) {
+          const bytes = await downloadPdf(f);
+          if (!bytes) continue;
+          const doc = await savePdfBytes(bytes, info.name || (side && side.name) || f.name, {
+            topic: (side && side.topic) || info.topic || "",
+            githubPath: "library/" + f.name,
+            githubSha: f.sha || "",
+          });
+          applySidecar(doc, side);
+          await FolioDB.put(doc);
+          if (doc.topic) rememberTopic(doc.topic);
+          added += 1;
+          continue;
+        }
+        if (shaChanged) {
+          const bytes = await downloadPdf(f);
+          if (bytes) {
+            await refreshPdfMeta(local, bytes);
+            if (side) applySidecar(local, side);
+            else resetMarksToPdf(local);
+            local.githubPath = "library/" + f.name;
+            local.githubSha = f.sha || "";
+            if ((side && side.topic) || info.topic) {
+              local.topic = (side && side.topic) || info.topic || local.topic;
+              if (local.topic) rememberTopic(local.topic);
+            }
+            await FolioDB.put(local);
+            replaced += 1;
+            continue;
+          }
+        }
+        if (remoteAt && remoteAt > (local.updatedAt || 0)) {
+          applySidecar(local, side);
+          local.githubPath = "library/" + f.name;
+          if (f.sha) local.githubSha = f.sha;
+          if ((side && side.topic) || info.topic) {
+            local.topic = (side && side.topic) || info.topic;
+            rememberTopic(local.topic);
+          }
+          await FolioDB.put(local);
+          updated += 1;
+        } else if (s.token && (local.updatedAt || 0) > remoteAt && !shaChanged) {
+          try { await pushDocToGithub(local); } catch (err) { console.warn(err); }
+        } else if (f.sha && !local.githubSha) {
+          local.githubSha = f.sha;
+          local.githubPath = "library/" + f.name;
+          await FolioDB.put(local);
+        }
       }
+
+      if (s.token) {
+        const remoteNames = new Set(files.map((f) => f.name));
+        for (const doc of state.docs || []) {
+          if (remoteNames.has(ghFileName(doc))) continue;
+          try { await pushDocToGithub(doc); added += 1; }
+          catch (err) { console.warn(err); }
+        }
+      }
+
       await refreshLibrary();
-      toast(t("syncOk") + (added ? " · " + added + t("syncNew") : ""));
+      if (state.view === "reader" && state.current) {
+        const fresh = await FolioDB.get(state.current.id);
+        if (fresh) {
+          state.current = fresh;
+          await renderPages();
+          renderPageMemos();
+          renderRemarks();
+        }
+      }
+      const extra = [];
+      if (added) extra.push(added + t("syncNew"));
+      if (updated) extra.push(updated + t("syncUpdated"));
+      if (replaced) extra.push(replaced + t("syncReplaced"));
+      toast(t("syncOk") + (extra.length ? " · " + extra.join(" · ") : ""));
     } catch (err) {
       console.warn(err);
       toast(t("syncFail"));
@@ -2001,6 +2410,7 @@
     toast(t("savedBrowser"));
   };
   $("#btnSync").onclick = syncFromGithub;
+  if ($("#btnSyncReader")) $("#btnSyncReader").onclick = syncFromGithub;
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});

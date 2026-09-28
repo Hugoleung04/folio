@@ -38,15 +38,15 @@ The browser opens at `http://127.0.0.1:8765/`. Keep the terminal window open whi
 
 Language toggle: **中 / EN** in the top bar.
 
-## GitHub sync (Grok → your PC)
+## GitHub sync (devices + Grok)
 
-Grok cannot write into the browser on your computer. Shared GitHub is the mailbox:
+Same GitHub account and repo on every device. **Save** uploads notes. **Sync** downloads them.
 
-1. Create a repo, e.g. `YOUR_USER/folio-library` (same GitHub account you use with Grok).
+1. Create a repo, e.g. `YOUR_USER/folio-library`.
 2. Add a folder `library/` and a file `library.json`.
 3. In Folio click **GitHub**, enter `YOUR_USER/folio-library`.
-4. Drop a PDF in Grok and ask: *put this into folio-library/library and update library.json*.
-5. On this device click **Sync**. The PDF appears in the library (and under its topic if `library.json` has one).
+4. Paste a token with Contents read/write (needed to upload notes).
+5. On device A: edit, click **Save**. On device B: click **Sync**.
 
 `library.json` example:
 
