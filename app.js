@@ -6,7 +6,7 @@
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => [...document.querySelectorAll(sel)];
-  const APP_VERSION = "1.3.0";
+  const APP_VERSION = "1.3.1";
 
   const I18N = {
     en: {
@@ -2170,6 +2170,12 @@
     return out;
   }
 
+  function utf8JsonFromGitHubB64(b64) {
+    const bin = atob(String(b64 || "").replace(/\n/g, ""));
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder("utf-8").decode(bytes));
+  }
+
   function ghFileName(doc) {
     if (doc && doc.githubPath && /\.pdf$/i.test(doc.githubPath)) {
       return doc.githubPath.replace(/^library\//, "");
@@ -2240,7 +2246,7 @@
     let catalog = { notes: [] };
     if (meta && meta.content) {
       try {
-        const parsed = JSON.parse(atob(meta.content.replace(/\n/g, "")));
+        const parsed = utf8JsonFromGitHubB64(meta.content);
         catalog = Array.isArray(parsed) ? { notes: parsed } : parsed;
         if (!Array.isArray(catalog.notes)) catalog.notes = [];
       } catch (_) {}
@@ -2297,7 +2303,7 @@
     const meta = await ghGetContent(repo, sidePath, branch, token);
     if (!meta || !meta.content) return null;
     try {
-      return JSON.parse(atob(meta.content.replace(/\n/g, "")));
+      return utf8JsonFromGitHubB64(meta.content);
     } catch {
       return null;
     }
@@ -2327,7 +2333,7 @@
       try {
         const meta = await ghGetContent(repo, "library.json", branch, s.token);
         if (meta && meta.content) {
-          const json = JSON.parse(atob(meta.content.replace(/\n/g, "")));
+          const json = utf8JsonFromGitHubB64(meta.content);
           const notes = Array.isArray(json) ? json : (json.notes || []);
           notes.forEach((n) => { if (n && n.file) catalog[n.file] = n; });
         }
@@ -2369,6 +2375,15 @@
           if (doc.topic) rememberTopic(doc.topic);
           added += 1;
           continue;
+        }
+        // Refresh titles/topics from catalog so mojibake names get fixed on sync
+        if (info.name) local.name = info.name;
+        if (info.topic) {
+          local.topic = info.topic;
+          rememberTopic(local.topic);
+        }
+        if (info.name || info.topic) {
+          await FolioDB.put(local);
         }
         if (shaChanged) {
           const bytes = await downloadPdf(f);
