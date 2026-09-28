@@ -16,18 +16,23 @@
       <div class="brand" id="brandHome" role="button" tabindex="0" title="Library / 書庫">
         <img class="brand-mark" src="icons/icon-192.png" alt="" />
         <div>
-          Folio <span class="app-ver" id="appVersion">v1.2.2</span>
+          Folio <span class="app-ver" id="appVersion">v1.3.0</span>
           <small id="brandSub">Study library</small>
         </div>
       </div>
       <div class="doc-title" id="docTitle"></div>
       <div class="top-actions" id="libraryActions">
-        <button class="btn" id="btnLang" title="Language">中 / EN</button>
-        <button class="btn" id="btnGithub" data-i18n="github">GitHub</button>
-        <button class="btn" id="btnSync" data-i18n="sync">Sync</button>
-        <button class="btn" id="btnImportPack" data-i18n="packImport">Import pack</button>
         <button class="btn" id="btnImport" data-i18n="upload">Upload PDF</button>
         <button class="btn primary" id="btnNewNotes" data-i18n="blank">Blank notebook</button>
+        <div class="menu-wrap" id="libMoreWrap">
+          <button class="btn" id="btnLibMore" data-i18n="more">More</button>
+          <div class="menu hidden" id="libMoreMenu">
+            <button type="button" id="btnSync" data-i18n="sync">Sync</button>
+            <button type="button" id="btnImportPack" data-i18n="packImport">Import pack</button>
+            <button type="button" id="btnGithub" data-i18n="github">GitHub</button>
+            <button type="button" id="btnLang" title="Language">中 / EN</button>
+          </div>
+        </div>
       </div>
       <div class="top-actions hidden" id="readerActions">
         <button class="btn primary" id="btnAddPage" data-i18n="addPage">+ Page</button>
@@ -43,7 +48,7 @@
       <div class="library-head">
         <div>
           <h1 data-i18n="library">Library</h1>
-          <p data-i18n="libraryHint">Upload lecture slides or papers. Annotate them. Add extra pages for your own remarks.</p>
+          <p id="libraryCount" class="lib-count"></p>
         </div>
         <input class="search" id="search" data-i18n-placeholder="search" placeholder="Search titles…" />
       </div>

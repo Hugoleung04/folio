@@ -6,7 +6,7 @@
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => [...document.querySelectorAll(sel)];
-  const APP_VERSION = "1.2.2";
+  const APP_VERSION = "1.3.0";
 
   const I18N = {
     en: {
@@ -62,7 +62,13 @@
       save: "Save",
       download: "Download PDF",
       library: "Library",
-      libraryHint: "Upload lecture slides or papers. Annotate them. Add extra pages for your own remarks.",
+      libraryHint: "Your notes on this device.",
+      more: "More",
+      recent: "Recent",
+      nNotes: " notes",
+      nNote: " note",
+      cardMore: "More actions",
+      emptyLib: "No notes yet. Upload a lecture PDF or start a blank notebook.",
       search: "Search titles…",
       remarks: "Remarks",
       remarkPh: "Write a remark for this document…",
@@ -161,7 +167,13 @@
       save: "儲存",
       download: "下載 PDF",
       library: "書庫",
-      libraryHint: "上傳講義或論文，直接在上面書寫、註解，並可插入新的備註頁。",
+      libraryHint: "筆記保存在這部裝置。",
+      more: "更多",
+      recent: "最近",
+      nNotes: " 份筆記",
+      nNote: " 份筆記",
+      cardMore: "更多操作",
+      emptyLib: "尚未有筆記。上傳講義 PDF，或開一本空白筆記簿。",
       search: "搜尋標題…",
       remarks: "備註",
       remarkPh: "為這份文件寫備註…",
@@ -419,16 +431,12 @@
     const topics = allTopics();
     const uncategorized = docs.filter((d) => !topicKey(d.topic)).length;
     bar.innerHTML = "";
-    const hint = document.createElement("p");
-    hint.className = "topic-hint";
-    hint.textContent = t("topicHint");
-    bar.appendChild(hint);
     const row = document.createElement("div");
     row.className = "chips";
     const addChip = (id, label, count) => {
       const btn = document.createElement("button");
       btn.className = "chip" + (state.topicFilter === id ? " active" : "");
-      btn.textContent = count == null ? label : `${label} (${count})`;
+      btn.textContent = count == null ? label : `${label}  ${count}`;
       btn.dataset.topic = id;
       btn.onclick = () => {
         state.topicFilter = id;
@@ -438,7 +446,7 @@
       row.appendChild(btn);
     };
     addChip("all", t("topicsAll"), docs.length);
-    addChip("none", t("topicsNone"), uncategorized);
+    if (uncategorized) addChip("none", t("topicsNone"), uncategorized);
     topics.forEach((name) => {
       addChip(name, name, docs.filter((d) => topicKey(d.topic) === name).length);
     });
@@ -472,35 +480,44 @@
     });
   }
 
+  function noteCountLabel(n) {
+    return n + (n === 1 ? t("nNote") : t("nNotes"));
+  }
+
   function renderGrid(q) {
     const body = $("#libraryBody") || $("#grid");
     const query = (q || "").trim().toLowerCase();
     const docs = state.docs.filter((d) => !query || (d.name || "").toLowerCase().includes(query) || topicKey(d.topic).toLowerCase().includes(query));
     renderTopicBar(state.docs);
+    const countEl = $("#libraryCount");
+    if (countEl) countEl.textContent = noteCountLabel(state.docs.length);
     body.innerHTML = "";
 
-    const tools = document.createElement("div");
-    tools.className = "grid tools-row";
-    tools.id = "grid";
-
-    const upload = document.createElement("div");
-    upload.className = "upload-card";
-    upload.innerHTML = `<div style="font-size:28px">＋</div><strong>${t("uploadCard")}</strong><span>${t("uploadHint")}</span>`;
-    upload.onclick = () => $("#fileInput").click();
-    tools.appendChild(upload);
-
-    const sample = document.createElement("div");
-    sample.className = "hint-card";
-    sample.innerHTML = `<div style="font-size:28px">☰</div><strong>${t("sampleCard")}</strong><span>${t("sampleHint")}</span>`;
-    sample.onclick = () => importFromUrl("samples/sample-lecture.pdf", "Sample lecture");
-    tools.appendChild(sample);
-
-    const tmpl = document.createElement("div");
-    tmpl.className = "hint-card";
-    tmpl.innerHTML = `<div style="font-size:28px">≡</div><strong>${t("templateCard")}</strong><span>${t("templateHint")}</span>`;
-    tmpl.onclick = () => importFromUrl("templates/lined-notebook.pdf", t("templateCard"));
-    tools.appendChild(tmpl);
-    body.appendChild(tools);
+    if (!state.docs.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-lib";
+      empty.innerHTML = `<strong>${t("emptyLib")}</strong>`;
+      const row = document.createElement("div");
+      row.className = "quick-row";
+      row.style.justifyContent = "center";
+      row.style.marginTop = "16px";
+      const up = document.createElement("button");
+      up.className = "quick-card";
+      up.innerHTML = `<span class="quick-ico">＋</span><span><strong>${t("uploadCard")}</strong><span>${t("uploadHint")}</span></span>`;
+      up.onclick = () => $("#fileInput").click();
+      const nb = document.createElement("button");
+      nb.className = "quick-card";
+      nb.innerHTML = `<span class="quick-ico">☰</span><span><strong>${t("blank")}</strong><span>${t("templateHint")}</span></span>`;
+      nb.onclick = createBlankNotebook;
+      const sm = document.createElement("button");
+      sm.className = "quick-card";
+      sm.innerHTML = `<span class="quick-ico">¶</span><span><strong>${t("sampleCard")}</strong><span>${t("sampleHint")}</span></span>`;
+      sm.onclick = () => importFromUrl("samples/sample-lecture.pdf", "Sample lecture");
+      row.append(up, nb, sm);
+      empty.appendChild(row);
+      body.appendChild(empty);
+      return;
+    }
 
     if (!docs.length && query) {
       const empty = document.createElement("div");
@@ -517,12 +534,26 @@
       return topicKey(d.topic) === filter;
     });
 
+    if (filter === "all" && !query && visible.length > 3) {
+      const recent = [...visible].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 4);
+      const sec = document.createElement("section");
+      sec.className = "topic-section";
+      sec.innerHTML = `<h2>${t("recent")} <small>${recent.length}</small></h2>`;
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      recent.forEach((doc) => grid.appendChild(makeDocCard(doc)));
+      sec.appendChild(grid);
+      body.appendChild(sec);
+    }
+
     const groups = [];
     if (filter === "all") {
       allTopics().forEach((name) => {
-        groups.push({ title: name, topic: name, items: visible.filter((d) => topicKey(d.topic) === name) });
+        const items = visible.filter((d) => topicKey(d.topic) === name);
+        if (items.length) groups.push({ title: name, topic: name, items });
       });
-      groups.push({ title: t("topicsNone"), topic: "", items: visible.filter((d) => !topicKey(d.topic)) });
+      const rest = visible.filter((d) => !topicKey(d.topic));
+      if (rest.length) groups.push({ title: t("topicsNone"), topic: "", items: rest });
     } else if (filter === "none") {
       groups.push({ title: t("topicsNone"), topic: "", items: visible });
     } else {
@@ -530,7 +561,6 @@
     }
 
     groups.forEach((g) => {
-      if (filter === "all" && !g.items.length && g.topic === "") return;
       const sec = document.createElement("section");
       sec.className = "topic-section";
       enableTopicDrop(sec, g.topic);
@@ -539,17 +569,14 @@
       sec.appendChild(h);
       const grid = document.createElement("div");
       grid.className = "grid";
-      if (!g.items.length) {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = t("noneYet") + " — " + t("dropHere");
-        grid.appendChild(empty);
-      } else {
-        g.items.forEach((doc) => grid.appendChild(makeDocCard(doc)));
-      }
+      g.items.forEach((doc) => grid.appendChild(makeDocCard(doc)));
       sec.appendChild(grid);
       body.appendChild(sec);
     });
+  }
+
+  function closeAllCardMenus() {
+    $$(".card-menu").forEach((n) => n.remove());
   }
 
   function makeDocCard(doc) {
@@ -562,6 +589,7 @@
     });
     const topicLabel = topicKey(doc.topic) || t("topicsNone");
     card.innerHTML = `
+        <button class="card-more" type="button" title="${t("cardMore")}">⋯</button>
         <div class="thumb" data-id="${doc.id}">
           ${doc.thumb ? `<img alt="" src="${doc.thumb}" />` : `<div class="placeholder">¶</div>`}
         </div>
@@ -572,40 +600,53 @@
             <span>${doc.pageCount || "?"} pp</span>
             <span>${fmtDate(doc.updatedAt)}</span>
           </div>
-          <div class="card-actions">
-            <button class="btn primary open">${t("open")}</button>
-            <button class="btn pack">${t("packSend")}</button>
-            <button class="btn rename">${t("rename")}</button>
-            <button class="btn danger del">${t("del")}</button>
-          </div>
         </div>`;
-    card.querySelector(".open").onclick = () => openDoc(doc.id);
-    card.querySelector(".thumb").onclick = () => openDoc(doc.id);
-    card.querySelector(".pack").onclick = (e) => {
-      e.stopPropagation();
-      exportFolioPack(doc.id);
-    };
+    const open = () => openDoc(doc.id);
+    card.querySelector(".thumb").onclick = open;
+    card.querySelector("h3").onclick = open;
     card.querySelector(".topic-pill").onclick = async (e) => {
       e.stopPropagation();
       const name = prompt(t("topicPrompt"), doc.topic || "");
       if (name === null) return;
       await setDocTopic(doc.id, name);
     };
-    card.querySelector(".rename").onclick = async (e) => {
+    card.querySelector(".card-more").onclick = (e) => {
       e.stopPropagation();
-      const name = prompt(t("rename"), doc.name);
-      if (!name) return;
-      const fresh = await FolioDB.get(doc.id);
-      fresh.name = name.trim();
-      await FolioDB.put(fresh);
-      refreshLibrary();
-    };
-    card.querySelector(".del").onclick = async (e) => {
-      e.stopPropagation();
-      if (!confirm(t("confirmDel"))) return;
-      await FolioDB.remove(doc.id);
-      toast(t("deleted"));
-      refreshLibrary();
+      const already = card.querySelector(".card-menu");
+      closeAllCardMenus();
+      if (already) return;
+      const menu = document.createElement("div");
+      menu.className = "card-menu";
+      menu.innerHTML = `
+        <button type="button" data-act="open">${t("open")}</button>
+        <button type="button" data-act="topic">${t("topicSet")}</button>
+        <button type="button" data-act="rename">${t("rename")}</button>
+        <button type="button" data-act="pack">${t("packSend")}</button>
+        <button type="button" data-act="del" class="danger">${t("del")}</button>`;
+      menu.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const act = ev.target.dataset.act;
+        closeAllCardMenus();
+        if (act === "open") return openDoc(doc.id);
+        if (act === "pack") return exportFolioPack(doc.id);
+        if (act === "topic") {
+          const name = prompt(t("topicPrompt"), doc.topic || "");
+          if (name !== null) await setDocTopic(doc.id, name);
+        } else if (act === "rename") {
+          const name = prompt(t("rename"), doc.name);
+          if (!name) return;
+          const fresh = await FolioDB.get(doc.id);
+          fresh.name = name.trim();
+          await FolioDB.put(fresh);
+          refreshLibrary();
+        } else if (act === "del") {
+          if (!confirm(t("confirmDel"))) return;
+          await FolioDB.remove(doc.id);
+          toast(t("deleted"));
+          refreshLibrary();
+        }
+      });
+      card.appendChild(menu);
     };
     return card;
   }
@@ -2411,6 +2452,19 @@
   };
   $("#btnSync").onclick = syncFromGithub;
   if ($("#btnSyncReader")) $("#btnSyncReader").onclick = syncFromGithub;
+  const moreBtn = $("#btnLibMore");
+  const moreMenu = $("#libMoreMenu");
+  if (moreBtn && moreMenu) {
+    moreBtn.onclick = (e) => {
+      e.stopPropagation();
+      moreMenu.classList.toggle("hidden");
+    };
+    moreMenu.addEventListener("click", () => moreMenu.classList.add("hidden"));
+  }
+  document.addEventListener("click", (e) => {
+    if (moreMenu && !e.target.closest("#libMoreWrap")) moreMenu.classList.add("hidden");
+    if (!e.target.closest(".card")) closeAllCardMenus();
+  });
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});
