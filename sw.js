@@ -1,4 +1,4 @@
-const CACHE = "folio-v3";
+const CACHE = "folio-v1.1.0";
 const PRECACHE = [
   "./",
   "./index.html",

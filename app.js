@@ -6,6 +6,7 @@
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => [...document.querySelectorAll(sel)];
+  const APP_VERSION = "1.1.0";
 
   const I18N = {
     en: {
@@ -192,6 +193,8 @@
     pageCount: 0,
     pageNum: 1,
     scale: 1.15,
+    scaleMin: 0.4,
+    scaleMax: 4.5,
     tool: "pen",
     color: "#1a1d24",
     drawing: null,
@@ -298,6 +301,8 @@
     $$("[data-i18n-placeholder]").forEach((el) => { el.placeholder = t(el.dataset.i18nPlaceholder); });
     $$("[data-i18n-title]").forEach((el) => { el.title = t(el.dataset.i18nTitle); });
     $("#brandSub").textContent = t("brandSub");
+    const ver = $("#appVersion");
+    if (ver) ver.textContent = "v" + APP_VERSION;
     if (state.view === "library") $("#docTitle").textContent = t("unsaved");
     document.documentElement.lang = state.lang === "zh" ? "zh-Hant" : "en";
   }
@@ -1293,11 +1298,14 @@
 
     const contentPoint = (clientX, clientY) => {
       const sr = stage.getBoundingClientRect();
+      const pr = pages.getBoundingClientRect();
       return {
-        x: stage.scrollLeft + (clientX - sr.left) - pages.offsetLeft,
-        y: stage.scrollTop + (clientY - sr.top) - pages.offsetTop,
+        x: clientX - pr.left,
+        y: clientY - pr.top,
         vx: clientX - sr.left,
         vy: clientY - sr.top,
+        w: pages.offsetWidth || 1,
+        h: pages.offsetHeight || 1,
       };
     };
 
@@ -1319,46 +1327,46 @@
       pages.style.transformOrigin = `${originX}px ${originY}px`;
     };
 
-    const applyLiveZoom = (factor, fingers) => {
+    const applyLiveZoom = (factor) => {
       live = factor;
-      if (fingers && fingers.length >= 2) {
-        const midX = (fingers[0].clientX + fingers[1].clientX) / 2;
-        const midY = (fingers[0].clientY + fingers[1].clientY) / 2;
-        const sr = stage.getBoundingClientRect();
-        viewX = midX - sr.left;
-        viewY = midY - sr.top;
-      }
       pages.style.transformOrigin = `${originX}px ${originY}px`;
       pages.style.transform = "scale(" + factor + ")";
       const label = $("#zoomLabel");
       if (label) label.textContent = Math.round(scale0 * factor * 100) + "%";
     };
 
-    const restoreFocusScroll = (fromScale, toScale) => {
-      const ratio = toScale / (fromScale || 1);
-      stage.scrollLeft = originX * ratio - viewX + pages.offsetLeft;
-      stage.scrollTop = originY * ratio - viewY + pages.offsetTop;
+    const keepPointInView = (oldW, oldH) => {
+      const ratioX = (pages.offsetWidth || 1) / (oldW || 1);
+      const ratioY = (pages.offsetHeight || 1) / (oldH || 1);
+      const sr = stage.getBoundingClientRect();
+      const pr = pages.getBoundingClientRect();
+      stage.scrollLeft += (pr.left + originX * ratioX) - (sr.left + viewX);
+      stage.scrollTop += (pr.top + originY * ratioY) - (sr.top + viewY);
     };
 
     const commitZoom = async () => {
+      const oldW = pages.offsetWidth || 1;
+      const oldH = pages.offsetHeight || 1;
       stage.classList.remove("pinching");
       pages.style.transform = "";
       pages.style.transformOrigin = "";
-      if (!live || Math.abs(live - 1) <= 0.03) {
+      if (!live || Math.abs(live - 1) <= 0.02) {
         live = 1;
         if ($("#zoomLabel")) $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
         return;
       }
-      const next = Math.min(2.6, Math.max(0.45, scale0 * live));
+      const next = Math.min(state.scaleMax, Math.max(state.scaleMin, scale0 * live));
       live = 1;
       pinching = false;
-      if (Math.abs(next - state.scale) > 0.02) {
-        const from = scale0;
+      if (Math.abs(next - state.scale) > 0.01) {
+        pages.style.visibility = "hidden";
         state.scale = next;
         await renderPages();
-        restoreFocusScroll(from, next);
-      } else if ($("#zoomLabel")) {
-        $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
+        keepPointInView(oldW, oldH);
+        pages.style.visibility = "";
+      } else {
+        keepPointInView(oldW, oldH);
+        if ($("#zoomLabel")) $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
       }
     };
 
@@ -1406,7 +1414,7 @@
       if (fingers.length >= 2) {
         e.preventDefault();
         if (!pinching) beginPinch(fingers);
-        applyLiveZoom(dist(fingers[0], fingers[1]) / (pinch0 || 1), fingers);
+        applyLiveZoom(dist(fingers[0], fingers[1]) / (pinch0 || 1));
       } else if (fingers.length === 1 && pan && !pinching) {
         e.preventDefault();
         stage.scrollLeft -= (fingers[0].clientX - pan.x);
@@ -1796,22 +1804,25 @@
   const zoomFromCenter = async (next) => {
     const stage = $("#stage");
     const pages = $("#pages");
-    const from = state.scale;
     const sr = stage.getBoundingClientRect();
-    const cx = sr.left + stage.clientWidth / 2;
-    const cy = sr.top + stage.clientHeight / 2;
-    const originX = stage.scrollLeft + (cx - sr.left) - pages.offsetLeft;
-    const originY = stage.scrollTop + (cy - sr.top) - pages.offsetTop;
+    const pr = pages.getBoundingClientRect();
+    const oldW = pages.offsetWidth || 1;
+    const oldH = pages.offsetHeight || 1;
+    const originX = (sr.left + stage.clientWidth / 2) - pr.left;
+    const originY = (sr.top + stage.clientHeight / 2) - pr.top;
     const viewX = stage.clientWidth / 2;
     const viewY = stage.clientHeight / 2;
     state.scale = next;
     await renderPages();
-    const ratio = next / (from || 1);
-    stage.scrollLeft = originX * ratio - viewX + pages.offsetLeft;
-    stage.scrollTop = originY * ratio - viewY + pages.offsetTop;
+    const ratioX = (pages.offsetWidth || 1) / oldW;
+    const ratioY = (pages.offsetHeight || 1) / oldH;
+    const sr2 = stage.getBoundingClientRect();
+    const pr2 = pages.getBoundingClientRect();
+    stage.scrollLeft += (pr2.left + originX * ratioX) - (sr2.left + viewX);
+    stage.scrollTop += (pr2.top + originY * ratioY) - (sr2.top + viewY);
   };
-  $("#zoomIn").onclick = () => zoomFromCenter(Math.min(2.6, state.scale + 0.15));
-  $("#zoomOut").onclick = () => zoomFromCenter(Math.max(0.45, state.scale - 0.15));
+  $("#zoomIn").onclick = () => zoomFromCenter(Math.min(state.scaleMax, +(state.scale + 0.25).toFixed(2)));
+  $("#zoomOut").onclick = () => zoomFromCenter(Math.max(state.scaleMin, +(state.scale - 0.25).toFixed(2)));
   $("#prevPage").onclick = () => scrollToPage(Math.max(1, state.pageNum - 1));
   $("#nextPage").onclick = () => scrollToPage(Math.min(seqCount(), state.pageNum + 1));
   $("#btnLang").onclick = () => {
