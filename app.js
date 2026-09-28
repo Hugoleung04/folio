@@ -1144,37 +1144,29 @@
     }
   }
 
+  function isPencil(e) {
+    if (!e) return false;
+    if (e.pointerType === "pen") return true;
+    if (e.touchType === "stylus") return true;
+    return false;
+  }
+
+  function setPenLock(on) {
+    const stage = $("#stage");
+    if (!stage) return;
+    stage.classList.toggle("pen-lock", !!on);
+    document.body.classList.toggle("pen-lock", !!on);
+  }
+
   function bindOverlay(overlay, wrap, page, viewport) {
     const toNorm = (e) => {
       const r = overlay.getBoundingClientRect();
       return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
     };
 
-    overlay.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
-      overlay.setPointerCapture(e.pointerId);
-      const p = toNorm(e);
-      if (state.tool === "pen" || state.tool === "highlighter") {
-        state.drawing = {
-          page, tool: state.tool, color: state.color,
-          width: state.tool === "highlighter" ? 16 : 2.2,
-          baseWidth: viewport.width, points: [p],
-        };
-      } else if (state.tool === "eraser") {
-        eraseAt(page, p, overlay, viewport);
-      } else if (state.tool === "text" || state.tool === "comment") {
-        openTextPop(wrap, page, p, state.tool);
-      } else if (state.tool === "image") {
-        state.pendingImagePage = page;
-        state.pendingImagePos = p;
-        $("#imageInput").click();
-      }
-    });
-
-    overlay.addEventListener("pointermove", (e) => {
-      if (!state.drawing || state.drawing.page !== page) return;
-      state.drawing.points.push(toNorm(e));
+    const paintLive = () => {
       drawAnnots(overlay, page, viewport);
+      if (!state.drawing || state.drawing.page !== page) return;
       const tmp = overlay.getContext("2d");
       const stroke = state.drawing;
       tmp.beginPath();
@@ -1185,14 +1177,59 @@
         : stroke.color;
       tmp.lineWidth = stroke.width;
       const pts = stroke.points;
+      if (!pts.length) return;
       tmp.moveTo(pts[0].x * overlay.width, pts[0].y * overlay.height);
       for (let i = 1; i < pts.length; i++) {
         tmp.lineTo(pts[i].x * overlay.width, pts[i].y * overlay.height);
       }
       tmp.stroke();
-    });
+    };
 
-    const endDraw = () => {
+    overlay.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 && e.button !== -1) return;
+      if (state.tool === "pen" || state.tool === "highlighter" || state.tool === "eraser") {
+        if (!isPencil(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        try { overlay.setPointerCapture(e.pointerId); } catch (_) {}
+        setPenLock(true);
+        const p = toNorm(e);
+        if (state.tool === "eraser") {
+          eraseAt(page, p, overlay, viewport);
+          return;
+        }
+        state.drawing = {
+          page, tool: state.tool, color: state.color,
+          width: state.tool === "highlighter" ? 16 : 2.2,
+          baseWidth: viewport.width, points: [p],
+          pointerId: e.pointerId,
+        };
+        return;
+      }
+      if (e.pointerType === "touch" || e.pointerType === "pen") return;
+      const p = toNorm(e);
+      if (state.tool === "text" || state.tool === "comment") {
+        openTextPop(wrap, page, p, state.tool);
+      } else if (state.tool === "image") {
+        state.pendingImagePage = page;
+        state.pendingImagePos = p;
+        $("#imageInput").click();
+      }
+    }, { passive: false });
+
+    overlay.addEventListener("pointermove", (e) => {
+      if (!state.drawing || state.drawing.page !== page) return;
+      if (!isPencil(e)) return;
+      if (state.drawing.pointerId != null && e.pointerId !== state.drawing.pointerId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      state.drawing.points.push(toNorm(e));
+      paintLive();
+    }, { passive: false });
+
+    const endDraw = (e) => {
+      if (e && state.drawing && state.drawing.pointerId != null && e.pointerId !== state.drawing.pointerId) return;
+      setPenLock(false);
       if (!state.drawing || state.drawing.page !== page) return;
       const stroke = state.drawing;
       state.drawing = null;
@@ -1201,8 +1238,143 @@
       state.dirty = true;
       drawAnnots(overlay, page, viewport);
     };
-    overlay.addEventListener("pointerup", endDraw);
-    overlay.addEventListener("pointercancel", endDraw);
+    overlay.addEventListener("pointerup", endDraw, { passive: false });
+    overlay.addEventListener("pointercancel", endDraw, { passive: false });
+    overlay.addEventListener("lostpointercapture", endDraw);
+  }
+
+  function initGestures() {
+    const stage = $("#stage");
+    const pages = $("#pages");
+    if (!stage || !pages || stage.dataset.gestures === "1") return;
+    stage.dataset.gestures = "1";
+
+    const fingerTouches = (touchList) =>
+      [...touchList].filter((t) => t.touchType !== "stylus");
+    const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    const isTypingTarget = (el) => {
+      if (!el || el === stage || el === pages) return false;
+      const tag = (el.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return true;
+      if (el.isContentEditable) return true;
+      return !!el.closest && !!el.closest("textarea, input, [contenteditable='true'], .word-editor, .text-pop");
+    };
+
+    let pinch0 = 0;
+    let scale0 = state.scale;
+    let live = 1;
+    let pan = null;
+    let pinching = false;
+
+    const applyLiveZoom = (factor) => {
+      live = factor;
+      pages.style.transformOrigin = "center top";
+      pages.style.transform = "scale(" + factor + ")";
+      const label = $("#zoomLabel");
+      if (label) label.textContent = Math.round(scale0 * factor * 100) + "%";
+    };
+
+    const commitZoom = async () => {
+      stage.classList.remove("pinching");
+      pages.style.transform = "";
+      if (!live || Math.abs(live - 1) <= 0.03) {
+        live = 1;
+        if ($("#zoomLabel")) $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
+        return;
+      }
+      const next = Math.min(2.6, Math.max(0.45, scale0 * live));
+      live = 1;
+      pinching = false;
+      if (Math.abs(next - state.scale) > 0.02) {
+        state.scale = next;
+        await renderPages();
+      } else if ($("#zoomLabel")) {
+        $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
+      }
+    };
+
+    stage.addEventListener("pointerdown", (e) => {
+      if (!isPencil(e)) return;
+      e.preventDefault();
+      setPenLock(true);
+    }, { capture: true, passive: false });
+
+    stage.addEventListener("pointermove", (e) => {
+      if (!isPencil(e)) return;
+      e.preventDefault();
+    }, { capture: true, passive: false });
+
+    const releasePen = (e) => {
+      if (!isPencil(e)) return;
+      if (!state.drawing) setPenLock(false);
+    };
+    stage.addEventListener("pointerup", releasePen, { capture: true });
+    stage.addEventListener("pointercancel", releasePen, { capture: true });
+
+    stage.addEventListener("touchstart", (e) => {
+      if (isTypingTarget(e.target) && e.touches.length < 2) return;
+      const fingers = fingerTouches(e.touches);
+      if (fingers.length === 0 || state.drawing) {
+        e.preventDefault();
+        return;
+      }
+      if (fingers.length >= 2) {
+        e.preventDefault();
+        pinching = true;
+        stage.classList.add("pinching");
+        pinch0 = dist(fingers[0], fingers[1]) || 1;
+        scale0 = state.scale;
+        live = 1;
+        pan = null;
+        state.drawing = null;
+      } else {
+        pan = { x: fingers[0].clientX, y: fingers[0].clientY };
+      }
+    }, { capture: true, passive: false });
+
+    stage.addEventListener("touchmove", (e) => {
+      if (isTypingTarget(e.target) && e.touches.length < 2 && !state.drawing) return;
+      const stylus = [...e.touches].some((t) => t.touchType === "stylus");
+      if (stylus || state.drawing) {
+        e.preventDefault();
+        return;
+      }
+      const fingers = fingerTouches(e.touches);
+      if (fingers.length >= 2) {
+        e.preventDefault();
+        if (!pinching) {
+          pinching = true;
+          stage.classList.add("pinching");
+          pinch0 = dist(fingers[0], fingers[1]) || 1;
+          scale0 = state.scale;
+          pan = null;
+        }
+        applyLiveZoom(dist(fingers[0], fingers[1]) / (pinch0 || 1));
+      } else if (fingers.length === 1 && pan && !pinching) {
+        e.preventDefault();
+        stage.scrollLeft -= (fingers[0].clientX - pan.x);
+        stage.scrollTop -= (fingers[0].clientY - pan.y);
+        pan = { x: fingers[0].clientX, y: fingers[0].clientY };
+      }
+    }, { capture: true, passive: false });
+
+    const endFingers = async (e) => {
+      const fingers = fingerTouches(e.touches);
+      if (pinching && fingers.length < 2) {
+        pinching = false;
+        await commitZoom();
+      }
+      if (fingers.length === 1) {
+        pan = { x: fingers[0].clientX, y: fingers[0].clientY };
+      }
+      if (fingers.length === 0) pan = null;
+    };
+    stage.addEventListener("touchend", endFingers, { capture: true, passive: false });
+    stage.addEventListener("touchcancel", endFingers, { capture: true, passive: false });
+
+    stage.addEventListener("gesturestart", (e) => e.preventDefault(), { passive: false });
+    stage.addEventListener("gesturechange", (e) => e.preventDefault(), { passive: false });
+    stage.addEventListener("gestureend", (e) => e.preventDefault(), { passive: false });
   }
 
   function eraseAt(page, p, overlay, viewport) {
@@ -1755,6 +1927,7 @@
     });
   })();
 
+  initGestures();
   applyI18n();
   refreshLibrary();
 })();
