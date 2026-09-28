@@ -1185,8 +1185,19 @@
       tmp.stroke();
     };
 
+    const placeAnnot = (p) => {
+      if (state.tool === "text" || state.tool === "comment") {
+        openTextPop(wrap, page, p, state.tool);
+      } else if (state.tool === "image") {
+        state.pendingImagePage = page;
+        state.pendingImagePos = p;
+        $("#imageInput").click();
+      }
+    };
+
     overlay.addEventListener("pointerdown", (e) => {
       if (e.button !== 0 && e.button !== -1) return;
+      if (!e.isPrimary) return;
       if (state.tool === "pen" || state.tool === "highlighter" || state.tool === "eraser") {
         if (!isPencil(e)) return;
         e.preventDefault();
@@ -1206,15 +1217,25 @@
         };
         return;
       }
-      if (e.pointerType === "touch" || e.pointerType === "pen") return;
-      const p = toNorm(e);
-      if (state.tool === "text" || state.tool === "comment") {
-        openTextPop(wrap, page, p, state.tool);
-      } else if (state.tool === "image") {
-        state.pendingImagePage = page;
-        state.pendingImagePos = p;
-        $("#imageInput").click();
-      }
+      if (state.tool !== "text" && state.tool !== "comment" && state.tool !== "image") return;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const startP = toNorm(e);
+      const pid = e.pointerId;
+      const onUp = (ev) => {
+        if (ev.pointerId !== pid) return;
+        overlay.removeEventListener("pointerup", onUp);
+        overlay.removeEventListener("pointercancel", onCancel);
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 14) return;
+        placeAnnot(startP);
+      };
+      const onCancel = (ev) => {
+        if (ev.pointerId !== pid) return;
+        overlay.removeEventListener("pointerup", onUp);
+        overlay.removeEventListener("pointercancel", onCancel);
+      };
+      overlay.addEventListener("pointerup", onUp);
+      overlay.addEventListener("pointercancel", onCancel);
     }, { passive: false });
 
     overlay.addEventListener("pointermove", (e) => {
@@ -1265,18 +1286,64 @@
     let live = 1;
     let pan = null;
     let pinching = false;
+    let originX = 0;
+    let originY = 0;
+    let viewX = 0;
+    let viewY = 0;
 
-    const applyLiveZoom = (factor) => {
+    const contentPoint = (clientX, clientY) => {
+      const sr = stage.getBoundingClientRect();
+      return {
+        x: stage.scrollLeft + (clientX - sr.left) - pages.offsetLeft,
+        y: stage.scrollTop + (clientY - sr.top) - pages.offsetTop,
+        vx: clientX - sr.left,
+        vy: clientY - sr.top,
+      };
+    };
+
+    const beginPinch = (fingers) => {
+      pinching = true;
+      stage.classList.add("pinching");
+      pinch0 = dist(fingers[0], fingers[1]) || 1;
+      scale0 = state.scale;
+      live = 1;
+      pan = null;
+      state.drawing = null;
+      const midX = (fingers[0].clientX + fingers[1].clientX) / 2;
+      const midY = (fingers[0].clientY + fingers[1].clientY) / 2;
+      const pt = contentPoint(midX, midY);
+      originX = pt.x;
+      originY = pt.y;
+      viewX = pt.vx;
+      viewY = pt.vy;
+      pages.style.transformOrigin = `${originX}px ${originY}px`;
+    };
+
+    const applyLiveZoom = (factor, fingers) => {
       live = factor;
-      pages.style.transformOrigin = "center top";
+      if (fingers && fingers.length >= 2) {
+        const midX = (fingers[0].clientX + fingers[1].clientX) / 2;
+        const midY = (fingers[0].clientY + fingers[1].clientY) / 2;
+        const sr = stage.getBoundingClientRect();
+        viewX = midX - sr.left;
+        viewY = midY - sr.top;
+      }
+      pages.style.transformOrigin = `${originX}px ${originY}px`;
       pages.style.transform = "scale(" + factor + ")";
       const label = $("#zoomLabel");
       if (label) label.textContent = Math.round(scale0 * factor * 100) + "%";
     };
 
+    const restoreFocusScroll = (fromScale, toScale) => {
+      const ratio = toScale / (fromScale || 1);
+      stage.scrollLeft = originX * ratio - viewX + pages.offsetLeft;
+      stage.scrollTop = originY * ratio - viewY + pages.offsetTop;
+    };
+
     const commitZoom = async () => {
       stage.classList.remove("pinching");
       pages.style.transform = "";
+      pages.style.transformOrigin = "";
       if (!live || Math.abs(live - 1) <= 0.03) {
         live = 1;
         if ($("#zoomLabel")) $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
@@ -1286,8 +1353,10 @@
       live = 1;
       pinching = false;
       if (Math.abs(next - state.scale) > 0.02) {
+        const from = scale0;
         state.scale = next;
         await renderPages();
+        restoreFocusScroll(from, next);
       } else if ($("#zoomLabel")) {
         $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
       }
@@ -1320,13 +1389,7 @@
       }
       if (fingers.length >= 2) {
         e.preventDefault();
-        pinching = true;
-        stage.classList.add("pinching");
-        pinch0 = dist(fingers[0], fingers[1]) || 1;
-        scale0 = state.scale;
-        live = 1;
-        pan = null;
-        state.drawing = null;
+        beginPinch(fingers);
       } else {
         pan = { x: fingers[0].clientX, y: fingers[0].clientY };
       }
@@ -1342,14 +1405,8 @@
       const fingers = fingerTouches(e.touches);
       if (fingers.length >= 2) {
         e.preventDefault();
-        if (!pinching) {
-          pinching = true;
-          stage.classList.add("pinching");
-          pinch0 = dist(fingers[0], fingers[1]) || 1;
-          scale0 = state.scale;
-          pan = null;
-        }
-        applyLiveZoom(dist(fingers[0], fingers[1]) / (pinch0 || 1));
+        if (!pinching) beginPinch(fingers);
+        applyLiveZoom(dist(fingers[0], fingers[1]) / (pinch0 || 1), fingers);
       } else if (fingers.length === 1 && pan && !pinching) {
         e.preventDefault();
         stage.scrollLeft -= (fingers[0].clientX - pan.x);
@@ -1410,9 +1467,11 @@
         <button class="btn" data-act="cancel">${t("cancel")}</button>
         <button class="btn primary" data-act="ok">${t("place")}</button>
       </div>`;
+    pop.addEventListener("pointerdown", (e) => e.stopPropagation());
+    pop.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
     wrap.appendChild(pop);
     const ta = pop.querySelector("textarea");
-    ta.focus();
+    setTimeout(() => ta.focus(), 30);
     const finish = (save) => {
       const text = ta.value.trim();
       pop.remove();
@@ -1734,14 +1793,25 @@
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) addRemark();
   });
   $("#btnUndo").onclick = undoStroke;
-  $("#zoomIn").onclick = async () => {
-    state.scale = Math.min(2.2, state.scale + 0.15);
+  const zoomFromCenter = async (next) => {
+    const stage = $("#stage");
+    const pages = $("#pages");
+    const from = state.scale;
+    const sr = stage.getBoundingClientRect();
+    const cx = sr.left + stage.clientWidth / 2;
+    const cy = sr.top + stage.clientHeight / 2;
+    const originX = stage.scrollLeft + (cx - sr.left) - pages.offsetLeft;
+    const originY = stage.scrollTop + (cy - sr.top) - pages.offsetTop;
+    const viewX = stage.clientWidth / 2;
+    const viewY = stage.clientHeight / 2;
+    state.scale = next;
     await renderPages();
+    const ratio = next / (from || 1);
+    stage.scrollLeft = originX * ratio - viewX + pages.offsetLeft;
+    stage.scrollTop = originY * ratio - viewY + pages.offsetTop;
   };
-  $("#zoomOut").onclick = async () => {
-    state.scale = Math.max(0.55, state.scale - 0.15);
-    await renderPages();
-  };
+  $("#zoomIn").onclick = () => zoomFromCenter(Math.min(2.6, state.scale + 0.15));
+  $("#zoomOut").onclick = () => zoomFromCenter(Math.max(0.45, state.scale - 0.15));
   $("#prevPage").onclick = () => scrollToPage(Math.max(1, state.pageNum - 1));
   $("#nextPage").onclick = () => scrollToPage(Math.min(seqCount(), state.pageNum + 1));
   $("#btnLang").onclick = () => {
@@ -1759,7 +1829,10 @@
     btn.onclick = () => {
       state.tool = btn.dataset.tool;
       $$("#tools [data-tool]").forEach((b) => b.classList.toggle("active", b === btn));
+      const stage = $("#stage");
+      if (stage) stage.dataset.tool = state.tool;
       if (state.tool === "image") toast(t("pickImage") + " / Ctrl+V");
+      if (state.tool === "text" || state.tool === "comment") toast(t(state.tool === "comment" ? "comment" : "text"));
     };
   });
   $$(".color-dot").forEach((btn) => {
