@@ -307,6 +307,9 @@ img { max-width: 100%; display: block; }
   width: max-content;
   margin: 0 auto;
 }
+.stage.pinching .pages {
+  will-change: transform;
+}
 .page-wrap {
   position: relative;
   box-shadow: 0 12px 40px rgba(0,0,0,0.45);

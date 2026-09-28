@@ -6,7 +6,7 @@
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => [...document.querySelectorAll(sel)];
-  const APP_VERSION = "1.1.0";
+  const APP_VERSION = "1.1.1";
 
   const I18N = {
     en: {
@@ -724,16 +724,11 @@
     return { width: w, height: h };
   }
 
-  async function renderPages() {
-    const token = ++state.renderToken;
-    const pagesEl = $("#pages");
-    pagesEl.innerHTML = "";
+  async function buildPageWraps(token) {
+    const wraps = [];
     const seq = ensureSequence(state.current, state.pdf ? state.pdf.numPages : 1);
-    $("#pageLabel").textContent = `${state.pageNum} / ${seq.length}`;
-    $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
-
     for (let i = 0; i < seq.length; i++) {
-      if (token !== state.renderToken) return;
+      if (token !== state.renderToken) return null;
       const display = i + 1;
       const item = seq[i];
       const wrap = document.createElement("div");
@@ -754,7 +749,7 @@
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           wrap.appendChild(canvas);
-          await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+          await page.render({ canvasContext: canvas.getContext("2d", { alpha: false }), viewport }).promise;
         } catch (err) {
           console.warn(err);
         }
@@ -842,9 +837,25 @@
         wrap.appendChild(pageDel);
       }
       wrap.appendChild(label);
-      pagesEl.appendChild(wrap);
+      wraps.push(wrap);
     }
+    return wraps;
+  }
+
+  function applyPageWraps(wraps) {
+    const pagesEl = $("#pages");
+    pagesEl.replaceChildren(...wraps);
+    const seq = state.current && state.current.sequence;
+    $("#pageLabel").textContent = `${state.pageNum} / ${(seq && seq.length) || wraps.length}`;
+    $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
     observePages();
+  }
+
+  async function renderPages() {
+    const token = ++state.renderToken;
+    const wraps = await buildPageWraps(token);
+    if (!wraps || token !== state.renderToken) return;
+    applyPageWraps(wraps);
   }
 
   function observePages() {
@@ -1348,26 +1359,31 @@
       const oldW = pages.offsetWidth || 1;
       const oldH = pages.offsetHeight || 1;
       stage.classList.remove("pinching");
-      pages.style.transform = "";
-      pages.style.transformOrigin = "";
       if (!live || Math.abs(live - 1) <= 0.02) {
         live = 1;
+        pinching = false;
+        pages.style.transform = "";
+        pages.style.transformOrigin = "";
         if ($("#zoomLabel")) $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
         return;
       }
       const next = Math.min(state.scaleMax, Math.max(state.scaleMin, scale0 * live));
       live = 1;
       pinching = false;
-      if (Math.abs(next - state.scale) > 0.01) {
-        pages.style.visibility = "hidden";
-        state.scale = next;
-        await renderPages();
-        keepPointInView(oldW, oldH);
-        pages.style.visibility = "";
-      } else {
-        keepPointInView(oldW, oldH);
+      if (Math.abs(next - state.scale) <= 0.01) {
+        pages.style.transform = "";
+        pages.style.transformOrigin = "";
         if ($("#zoomLabel")) $("#zoomLabel").textContent = Math.round(state.scale * 100) + "%";
+        return;
       }
+      const token = ++state.renderToken;
+      state.scale = next;
+      const wraps = await buildPageWraps(token);
+      if (!wraps || token !== state.renderToken) return;
+      pages.style.transform = "";
+      pages.style.transformOrigin = "";
+      applyPageWraps(wraps);
+      keepPointInView(oldW, oldH);
     };
 
     stage.addEventListener("pointerdown", (e) => {
@@ -1812,8 +1828,16 @@
     const originY = (sr.top + stage.clientHeight / 2) - pr.top;
     const viewX = stage.clientWidth / 2;
     const viewY = stage.clientHeight / 2;
+    const factor = next / (state.scale || 1);
+    pages.style.transformOrigin = `${originX}px ${originY}px`;
+    pages.style.transform = "scale(" + factor + ")";
+    const token = ++state.renderToken;
     state.scale = next;
-    await renderPages();
+    const wraps = await buildPageWraps(token);
+    if (!wraps || token !== state.renderToken) return;
+    pages.style.transform = "";
+    pages.style.transformOrigin = "";
+    applyPageWraps(wraps);
     const ratioX = (pages.offsetWidth || 1) / oldW;
     const ratioY = (pages.offsetHeight || 1) / oldH;
     const sr2 = stage.getBoundingClientRect();

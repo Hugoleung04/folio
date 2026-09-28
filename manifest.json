@@ -1,7 +1,7 @@
 {
   "name": "Folio",
   "short_name": "Folio",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Local-first PDF study notes. Annotate, comment, and add remark pages.",
   "start_url": "./index.html",
   "scope": "./",
